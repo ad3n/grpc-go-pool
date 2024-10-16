@@ -156,7 +156,7 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 	case wrapper = <-clients:
 		// All good
 	case <-ctx.Done():
-		return nil, ctx.Err() // ErrTimeout // it would better returns ctx.Err()
+		return nil, context.Cause(ctx) // ErrTimeout // it would better returns ctx.Err()
 	}
 
 	// If the wrapper was idle too long, close the connection and create a new
@@ -178,6 +178,11 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 			// client in the channel
 			clients <- ClientConn{
 				pool: p,
+			}
+
+			// Propagate context errors properly if needed.
+			if ctx.Err() != nil {
+				err = context.Cause(ctx)
 			}
 		}
 		// This is a new connection, reset its initiated time
