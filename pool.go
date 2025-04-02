@@ -31,15 +31,18 @@ type FactoryWithContext func(context.Context) (*grpc.ClientConn, error)
 
 // Pool is the grpc client pool
 type Pool struct {
+	mu sync.Mutex
+
 	clients         chan ClientConn
 	factory         FactoryWithContext
 	idleTimeout     time.Duration
 	maxLifeDuration time.Duration
-	mu              sync.RWMutex
 }
 
 // ClientConn is the wrapper for a grpc client conn
 type ClientConn struct {
+	mu sync.Mutex
+
 	*grpc.ClientConn
 	pool          *Pool
 	timeUsed      time.Time
@@ -103,8 +106,8 @@ func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capac
 }
 
 func (p *Pool) getClients() chan ClientConn {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	return p.clients
 }
@@ -153,7 +156,7 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 	case wrapper = <-clients:
 		// All good
 	case <-ctx.Done():
-		return nil, ErrTimeout // it would better returns ctx.Err()
+		return nil, context.Cause(ctx) // ErrTimeout // it would better returns ctx.Err()
 	}
 
 	// If the wrapper was idle too long, close the connection and create a new
@@ -176,6 +179,11 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 			clients <- ClientConn{
 				pool: p,
 			}
+
+			// Propagate context errors properly if needed.
+			if ctx.Err() != nil {
+				err = context.Cause(ctx)
+			}
 		}
 		// This is a new connection, reset its initiated time
 		wrapper.timeInitiated = time.Now()
@@ -187,12 +195,17 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 // Unhealthy marks the client conn as unhealthy, so that the connection
 // gets reset when closed
 func (c *ClientConn) Unhealthy() {
+	c.mu.Lock()
 	c.unhealthy = true
+	c.mu.Unlock()
 }
 
 // Close returns a ClientConn to the pool. It is safe to call multiple time,
 // but will return an error after first time
 func (c *ClientConn) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c == nil {
 		return nil
 	}
@@ -210,7 +223,7 @@ func (c *ClientConn) Close() error {
 	// time, if it's in the past it's too old
 	maxDuration := c.pool.maxLifeDuration
 	if maxDuration > 0 && c.timeInitiated.Add(maxDuration).Before(time.Now()) {
-		c.Unhealthy()
+		c.unhealthy = true
 	}
 
 	// We're cloning the wrapper so we can set ClientConn to nil in the one
