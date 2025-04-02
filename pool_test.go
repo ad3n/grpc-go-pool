@@ -2,16 +2,18 @@ package grpcpool
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestNew(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithInsecure())
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 3, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -93,9 +95,39 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestCapacity(t *testing.T) {
+	// Assign negative capacity, test that it is changed to 1
+	p, err := New(func() (*grpc.ClientConn, error) {
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}, -1, -2, 0)
+	if err != nil {
+		t.Errorf("The pool returned an error: %s", err.Error())
+	}
+	if a := p.Available(); a != 1 {
+		t.Errorf("The pool available was %d but should be 1", a)
+	}
+	if a := p.Capacity(); a != 1 {
+		t.Errorf("The pool capacity was %d but should be 1", a)
+	}
+
+	// Assing more initial connections than capacity, test that it is changed to cap limit
+	p, err = New(func() (*grpc.ClientConn, error) {
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}, 100, 2, 0)
+	if err != nil {
+		t.Errorf("The pool returned an error: %s", err.Error())
+	}
+	if a := p.Available(); a != 2 {
+		t.Errorf("The pool available was %d but should be 2", a)
+	}
+	if a := p.Capacity(); a != 2 {
+		t.Errorf("The pool capacity was %d but should be 2", a)
+	}
+}
+
 func TestTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithInsecure())
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -112,7 +144,9 @@ func TestTimeout(t *testing.T) {
 	// We want to fetch a second one, with a timeout. If the timeout was
 	// ommitted, the pool would wait indefinitely as it'd wait for another
 	// client to get back into the queue
-	ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(10*time.Millisecond))
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(10*time.Millisecond))
+	defer cancel()
+
 	_, err2 := p.Get(ctx)
 	if err2 != ErrTimeout {
 		t.Errorf("Expected error \"%s\" but got \"%s\"", ErrTimeout, err2.Error())
@@ -121,7 +155,7 @@ func TestTimeout(t *testing.T) {
 
 func TestMaxLifeDuration(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithInsecure())
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0, 1)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -145,7 +179,7 @@ func TestMaxLifeDuration(t *testing.T) {
 	count := 0
 	p, err = New(func() (*grpc.ClientConn, error) {
 		count++
-		return grpc.Dial("example.com", grpc.WithInsecure())
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0, time.Minute)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -171,12 +205,34 @@ func TestMaxLifeDuration(t *testing.T) {
 	if count > 1 {
 		t.Errorf("Dial function has been called multiple times")
 	}
+}
 
+func TestIdleTimeout(t *testing.T) {
+	// Let's test idle timeout for connection laying in the pool
+	// Call Get 3 times. 2 of them will happen before idle timeout, one after. Connection should be created 2 times total
+	count := 0
+	p, err := New(func() (*grpc.ClientConn, error) {
+		count++
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}, 1, 1, time.Millisecond)
+	if err != nil {
+		t.Errorf("The pool returned an error: %s", err.Error())
+	}
+	c, _ := p.Get(context.Background())
+	c.Close()
+	c, _ = p.Get(context.Background())
+	c.Close()
+	time.Sleep(10 * time.Millisecond)
+	c, _ = p.Get(context.Background())
+	c.Close()
+	if count != 2 {
+		t.Errorf("Dial function has been called only %v times, expected 2", count)
+	}
 }
 
 func TestPoolClose(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithInsecure())
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -198,6 +254,19 @@ func TestPoolClose(t *testing.T) {
 	if cc.GetState() != connectivity.Shutdown {
 		t.Errorf("Returned connection was not closed, underlying connection is not in shutdown state")
 	}
+
+	if p.Capacity() != 0 {
+		t.Errorf("Closed pool capacity is not zero")
+	}
+
+	if p.Available() != 0 {
+		t.Errorf("Closed pool availability is not zero")
+	}
+
+	_, err = p.Get(context.Background())
+	if err != ErrClosed {
+		t.Errorf("Closed pool returned unexpected error")
+	}
 }
 
 func TestContextCancelation(t *testing.T) {
@@ -210,7 +279,7 @@ func TestContextCancelation(t *testing.T) {
 			return nil, ctx.Err()
 
 		default:
-			return grpc.Dial("example.com", grpc.WithInsecure())
+			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 	}, 1, 1, 0)
@@ -230,7 +299,7 @@ func TestContextTimeout(t *testing.T) {
 
 		// wait for the deadline to pass
 		case <-time.After(time.Millisecond):
-			return grpc.Dial("example.com", grpc.WithInsecure())
+			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 	}, 1, 1, 0)
@@ -242,7 +311,7 @@ func TestContextTimeout(t *testing.T) {
 
 func TestGetContextTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithInsecure())
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 
 	if err != nil {
@@ -270,8 +339,8 @@ func TestGetContextFactoryTimeout(t *testing.T) {
 			return nil, ctx.Err()
 
 		// wait for the deadline to pass
-		case <-time.After(time.Millisecond):
-			return grpc.Dial("example.com", grpc.WithInsecure())
+		case <-time.After(100 * time.Millisecond):
+			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 	}, 1, 1, 0)
@@ -288,11 +357,92 @@ func TestGetContextFactoryTimeout(t *testing.T) {
 	c.Unhealthy()
 	c.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
 
 	_, err = p.Get(ctx)
 	if err != context.DeadlineExceeded {
 		t.Errorf("Returned error was not context.DeadlineExceeded, but the context was timed out before the Get invocation")
 	}
+}
+
+func TestNilPtr(t *testing.T) {
+	p, err := New(func() (*grpc.ClientConn, error) {
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}, 1, 1, 0)
+
+	if err != nil {
+		t.Errorf("The pool returned an error: %s", err.Error())
+	}
+
+	c, _ := p.Get(context.Background())
+	c.Unhealthy() // suppress linter warning before assigning to nil
+
+	// after setting pointers to nil functions should return, no crash should be triggered
+	p = nil
+	p.Get(context.Background())
+	p.getClients()
+	p.put(nil)
+	p.IsClosed()
+	p.Available()
+	p.Capacity()
+	p.Close()
+
+	c = nil
+	c.Unhealthy()
+	c.Close()
+}
+
+// tun Racing tests with `-race` flag
+func TestConnRacing(t *testing.T) {
+	p, err := New(func() (*grpc.ClientConn, error) {
+		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}, 1, 1, 0)
+
+	if err != nil {
+		t.Errorf("The pool returned an error: %s", err.Error())
+	}
+
+	var wg sync.WaitGroup
+	const iterations = 10
+
+	// Attempt to close same connection in different threads
+	conn, _ := p.Get(context.Background())
+	for i := 0; i < iterations; i++ {
+		wg.Add(1)
+		go conn.Close()
+		wg.Done()
+	}
+	wg.Wait()
+
+	// Check racing condintion with Pool and Connection close
+	conn, _ = p.Get(context.Background())
+	go p.Close()
+	go conn.Close()
+}
+
+func TestPoolRacing(t *testing.T) {
+	var wg sync.WaitGroup
+	const iterations = 1000
+
+	for i := 0; i < iterations; i++ {
+		wg.Add(1)
+		p, err := New(func() (*grpc.ClientConn, error) {
+			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		}, 1, 1, 0)
+
+		if err != nil {
+			t.Errorf("The pool returned an error: %s", err.Error())
+		}
+
+		// deliberately call multiple Close commands to force race
+		conn, _ := p.Get(context.Background())
+		go p.Close()
+		go p.Close()
+		go conn.Close()
+		go conn.Close()
+
+		wg.Done()
+	}
+	wg.Wait()
 }
