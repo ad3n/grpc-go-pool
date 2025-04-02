@@ -13,7 +13,7 @@ import (
 
 func TestNew(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 3, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -98,7 +98,7 @@ func TestNew(t *testing.T) {
 func TestCapacity(t *testing.T) {
 	// Assign negative capacity, test that it is changed to 1
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, -1, -2, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -112,7 +112,7 @@ func TestCapacity(t *testing.T) {
 
 	// Assing more initial connections than capacity, test that it is changed to cap limit
 	p, err = New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 100, 2, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -127,7 +127,7 @@ func TestCapacity(t *testing.T) {
 
 func TestTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -155,7 +155,7 @@ func TestTimeout(t *testing.T) {
 
 func TestMaxLifeDuration(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0, 1)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -168,7 +168,7 @@ func TestMaxLifeDuration(t *testing.T) {
 
 	// The max life of the connection was very low (1ns), so when we close
 	// the connection it should get marked as unhealthy
-	if err := c.Close(); err != nil {
+	if err = c.Close(); err != nil {
 		t.Errorf("Close returned an error: %s", err.Error())
 	}
 	if !c.unhealthy {
@@ -179,7 +179,7 @@ func TestMaxLifeDuration(t *testing.T) {
 	count := 0
 	p, err = New(func() (*grpc.ClientConn, error) {
 		count++
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0, time.Minute)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -213,7 +213,7 @@ func TestIdleTimeout(t *testing.T) {
 	count := 0
 	p, err := New(func() (*grpc.ClientConn, error) {
 		count++
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, time.Millisecond)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -232,7 +232,7 @@ func TestIdleTimeout(t *testing.T) {
 
 func TestPoolClose(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
@@ -244,7 +244,7 @@ func TestPoolClose(t *testing.T) {
 	}
 
 	cc := c.ClientConn
-	if err := c.Close(); err != nil {
+	if err = c.Close(); err != nil {
 		t.Errorf("Close returned an error: %s", err.Error())
 	}
 
@@ -279,7 +279,7 @@ func TestContextCancelation(t *testing.T) {
 			return nil, ctx.Err()
 
 		default:
-			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+			return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 	}, 1, 1, 0)
@@ -299,7 +299,7 @@ func TestContextTimeout(t *testing.T) {
 
 		// wait for the deadline to pass
 		case <-time.After(time.Millisecond):
-			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+			return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 	}, 1, 1, 0)
@@ -311,7 +311,7 @@ func TestContextTimeout(t *testing.T) {
 
 func TestGetContextTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 
 	if err != nil {
@@ -340,7 +340,7 @@ func TestGetContextFactoryTimeout(t *testing.T) {
 
 		// wait for the deadline to pass
 		case <-time.After(100 * time.Millisecond):
-			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+			return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 	}, 1, 1, 0)
@@ -368,7 +368,7 @@ func TestGetContextFactoryTimeout(t *testing.T) {
 
 func TestNilPtr(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 
 	if err != nil {
@@ -396,7 +396,7 @@ func TestNilPtr(t *testing.T) {
 // tun Racing tests with `-race` flag
 func TestConnRacing(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
-		return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, 1, 1, 0)
 
 	if err != nil {
@@ -428,7 +428,7 @@ func TestPoolRacing(t *testing.T) {
 	for i := 0; i < iterations; i++ {
 		wg.Add(1)
 		p, err := New(func() (*grpc.ClientConn, error) {
-			return grpc.Dial("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
+			return grpc.NewClient("example.com", grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}, 1, 1, 0)
 
 		if err != nil {

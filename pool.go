@@ -51,37 +51,38 @@ type ClientConn struct {
 // New creates a new clients pool with the given initial and maximum capacity,
 // and the timeout for the idle clients. Returns an error if the initial
 // clients could not be created
-func New(factory Factory, init, capacity int, idleTimeout time.Duration,
-	maxLifeDuration ...time.Duration) (*Pool, error) {
-	return NewWithContext(context.Background(), func(ctx context.Context) (*grpc.ClientConn, error) { return factory() },
-		init, capacity, idleTimeout, maxLifeDuration...)
+func New(factory Factory, init, capacity int, idleTimeout time.Duration, maxLifeDuration ...time.Duration) (*Pool, error) {
+	return NewWithContext(context.Background(), func(ctx context.Context) (*grpc.ClientConn, error) { return factory() }, init, capacity, idleTimeout, maxLifeDuration...)
 }
 
 // NewWithContext creates a new clients pool with the given initial and maximum
 // capacity, and the timeout for the idle clients. The context parameter would
 // be passed to the factory method during initialization. Returns an error if the
 // initial clients could not be created.
-func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capacity int, idleTimeout time.Duration,
-	maxLifeDuration ...time.Duration) (*Pool, error) {
-
+func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capacity int, idleTimeout time.Duration, maxLifeDuration ...time.Duration) (*Pool, error) {
 	if capacity <= 0 {
 		capacity = 1
 	}
+
 	if init < 0 {
 		init = 0
 	}
+
 	if init > capacity {
 		init = capacity
 	}
+
 	p := &Pool{
 		clients:     make(chan *ClientConn, capacity),
 		factory:     factory,
 		idleTimeout: idleTimeout,
 	}
+
 	if len(maxLifeDuration) > 0 {
 		p.maxLifeDuration = maxLifeDuration[0]
 	}
-	for i := 0; i < init; i++ {
+
+	for range init {
 		c, err := factory(ctx)
 		if err != nil {
 			return nil, err
@@ -94,12 +95,14 @@ func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capac
 			timeInitiated: time.Now(),
 		}
 	}
+
 	// Fill the rest of the pool with empty clients
-	for i := 0; i < capacity-init; i++ {
+	for range capacity - init {
 		p.clients <- &ClientConn{
 			pool: p,
 		}
 	}
+
 	return p, nil
 }
 
@@ -233,6 +236,7 @@ func (c *ClientConn) Close() error {
 	if c.ClientConn == nil {
 		return ErrAlreadyClosed
 	}
+
 	if c.pool.IsClosed() {
 		return ErrClosed
 	}
@@ -254,17 +258,20 @@ func (c *ClientConn) Close() error {
 		ClientConn: c.ClientConn,
 		timeUsed:   time.Now(),
 	}
+
 	if c.unhealthy {
 		wrapper.ClientConn.Close()
 		wrapper.ClientConn = nil
 	} else {
 		wrapper.timeInitiated = c.timeInitiated
 	}
+
 	if err := c.pool.put(wrapper); err != nil {
 		return err
 	}
 
 	c.ClientConn = nil // Mark as closed
+
 	return nil
 }
 
@@ -273,6 +280,7 @@ func (p *Pool) Capacity() int {
 	if p.IsClosed() {
 		return 0
 	}
+
 	return cap(p.getClients())
 }
 
@@ -281,5 +289,6 @@ func (p *Pool) Available() int {
 	if p.IsClosed() {
 		return 0
 	}
+
 	return len(p.getClients())
 }
